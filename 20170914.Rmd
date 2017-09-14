@@ -36,6 +36,9 @@ prune.tree=prune(churn.rp, cp=churn.cp)
 plot(prune.tree, uniform=TRUE,branch = 0.6, margin=0.1)
 text(prune.tree, all=TRUE, use.n=TRUE, cex=0.7)
 
+# cut point 預設為0.5
+# 例如癌正，可以設為0.2就為高風險
+
 predictions <-predict(prune.tree, testset, type='class')
 table(predictions,testset$churn)
 
@@ -47,13 +50,17 @@ confusionMatrix(table(predictions, testset$churn))
 ```
 
 ## Estimating model performance with k-fold cross-validation
+## 分為十分，9份建模，1份預測，作十次
 ```{R}
+# 分十組，每個樣本都有編號
 ind = cut(1:nrow(churnTrain), breaks=10, labels=F)
 ind
 
 accuracies = c()
 for (i in 1:10) {
+  # 不為i的拿來建模(有9份)
   fit = rpart(formula=churn ~., data=churnTrain[ind != i,])
+  # 為i的拿來預測
   predictions = predict(fit, churnTrain[ind == i, ! names(churnTrain) %in% c("churn")], type="class")
   correct_count = sum(predictions == churnTrain[ind == i,c("churn")])
   accuracies = append(correct_count / nrow(churnTrain[ind == i,]), accuracies)
@@ -65,12 +72,31 @@ mean(accuracies)
 
 ## caret cross-validation
 ```{R}
+# 機器學習的套件
 install.packages("caret")
 library(caret)
+# repeatedcv: cross validation，每次將樣本打亂，作3次，分十等份
 control=trainControl(method="repeatedcv", number=10, repeats=3)
+# method 可訓練的模型/演算法 可svn, knowledge base, 國際迴歸
+# trControl: 調整訓練參數
+# 過程中，系統會自動幫你維調參數
+
 model =train(churn~., data=trainset, method="rpart", trControl=control)
 model
+# Kappa 是另一個績效指標
+# Accuracy 是訓練的
+
 predictions = predict(model, testset)
+# 我們care是測試集
+
+# 強化：先使用不同演算法，比較那一種比較好，如果不行，再用下列：
+# 如果還會強化準確度 ensemble learning 整體學習，隨機森林演算
+# 作出很多決策樹，每棵決策樹的差異愈大愈好，每棵決策樹都可以投票，多數決
+# 讓不同決策樹，有不同特常，有的識別外型，有的識別彥色，有的識別大小
+# 拔鞋式取樣，N, M 取後放回，N為樣本，M為特徵，大N，取小n,小n可以重覆，由大M，取小m，看不同角度
+# 
+
+# 其它小記：樣本愈多愈好，但若增加，不會提供準確度，就可以不用再增加
 
 table(predictions,testset$churn)
 ```
@@ -78,6 +104,7 @@ table(predictions,testset$churn)
 ## find importance variable
 ```{R}
 library('caret')
+# 將不同模型放入，找出重要的特徵(變數)
 importance = varImp(model, scale=FALSE)
 importance
 plot(importance)
@@ -89,21 +116,34 @@ plot(importance)
 - http://www.navan.name/roc/
 
 ```{R}
+# ROC 
 install.packages("ROCR")
 library(ROCR)
+# 取機率值
 predictions <-predict(churn.rp, testset, type="prob")
 head(predictions)
+# 取得被預測為yes的機率
 pred.to.roc<-predictions[, 1]
 head(pred.to.roc)
+# 計算每個切點下，sensitivy, specicity的值，找出比重要的cut point
 pred.rocr<-prediction(pred.to.roc, testset$churn)
 pred.rocr
+# 準備畫圖的資料, measur：指定畫的圖,
+# 還可以畫 precision/recall, sensitivity/specifickty plots 黑板上的雙峰圖
+# 還可以算auc面積值
+# 下面算出 auc 面積,y.value(), perf.rocr@y.values
 perf.rocr<-performance(pred.rocr, measure ="auc", x.measure="cutoff")
+# 準備畫曲線的值
 perf.tpr.rocr<-performance(pred.rocr, "tpr","fpr")
+
 plot(perf.tpr.rocr,main=paste("AUC:",(perf.rocr@y.values)))
+
+#
 ```
 
 ## model comparison
 ```{R}
+# 比較三種模型的roc
 #rpart
 library('rpart')
 churn.rp<-rpart(churn ~., data=trainset)
@@ -117,18 +157,26 @@ ctree.model = ctree(churn ~ . , data = trainset)
 library(C50)
 c50.model = C5.0(churn ~., data=trainset)
 
+# 取得每個樣本預測為 yes 的機率值
 rp.predict.prob = predict(churn.rp, testset,type='prob')
 c50.predict.prob = predict(c50.model,testset,type='prob')
-ctree.predict.prob = sapply(predict(ctree.model ,testset,type='prob'),function(e){unlist(e)[1]})
+ctree.predict.prob = sapply(predict(ctree.model ,testset,type='prob'),function(e){unlist(e)[1]}) # 為yes的機率值放在[1]
+
+# 取得tp,fp, tn, fn的值
 rp.prediction = prediction(rp.predict.prob[,1],testset$churn)
 c50.prediction = prediction(c50.predict.prob[,1],testset$churn)
 ctree.prediction = prediction(ctree.predict.prob,testset$churn)
+
+# 
 rp.performance = performance(rp.prediction, "tpr","fpr")
 c50.performance = performance(c50.prediction, "tpr","fpr")
 ctree.performance = performance(ctree.prediction, "tpr","fpr")
+
+# 畫圖, add是指加在前面一張圖
 plot(rp.performance,col='red')
 plot(c50.performance, add=T,col='green')
 plot(ctree.performance, add=T,col='blue')
+# 因為都是決策樹，所以圖型很像，但可以用auc面積值來判斷
 ```
 
 # 分群問題
@@ -142,6 +190,7 @@ y =c(1, 0, 1, 1, 0, 1)
 ?dist
 rbind(x,y)
 
+# 兩兩之間距離
 dist(rbind(x,y), method ="euclidean")
 sqrt(sum((x-y)^2))
 dist(rbind(x,y), method ="minkowski", p=2)
@@ -154,11 +203,18 @@ dist(rbind(x,y), method ="minkowski", p=1)
 
 # Hierarchical Clustering
 ```{R}
+# 階層式
 customer=read.csv('data/customer.csv',header=TRUE)
 head(customer)
 str(customer)
 
 #數值變數作正規化
+# -1 將ID第一欄拿掉，不用分析
+#在分群前，要先作標準化的動作 (樣本點-平均數)/標準差
+#為何要作標準化，因為每個欄位的單位不同，若算距離時，單位比較的小的權重比較大
+#將每個樣本點的值都會變為離平均值有多少個標準差，這樣就不會有權重不一致的問題
+#Sex: 負值為女生
+#若 |z scale| >= 3, 就是一個離群值, scale() 將離群值去除
 customer_s =scale(customer[,-1])
 ?scale
 
@@ -167,9 +223,15 @@ round(mean(customer_s[,2]),3)
 round(sd(customer_s[,2]),3)
 
 #聚合式(bottom-up)
+#好處，開始不用決定分多少群，畫完圖再決定
 ?hclust
+# dist()産生距離矩陣，method: 衡量兩群距離的方法
 hc=hclust(dist(customer_s, method="euclidean"), method="ward.D2")
+# 産生階層數
+# 最下面是指資料的index
+# hang: 設定是否底部其頭
 plot(hc,hang =-0.01, cex=0.7)
+
 
 hc3 =hclust(dist(customer, method="euclidean"), method="single")
 plot(hc3, hang =-0.01, cex=0.8)
@@ -179,22 +241,31 @@ plot(hc3, hang =-0.01, cex=0.8)
 
 ## cutree
 ```{R}
+# 用來作分組，k設定要分幾組，回傳每個樣本點，被分在那一組
 fit =cutree(hc, k =4)
 fit
+# 看到每組的樣本數
 table(fit)
+
 plot(hc, hang =-0.01, cex=0.7)
+# 畫紅框，看分組
 rect.hclust(hc, k =4, border="red")
 rect.hclust(hc, k =3, border="blue")
 
+# 拉出原本的資料集，再對原始資料作解釋
+# fit 1，代表第一群的資料, 2 代表第二群...
 c_1 = customer[fit == 1,]
+# 用平均資料來作述樹統計，依特徵來作命名
 summary(c_1)
 ```
 
 ```{r}
 #分裂式階層式(top-down)
+#要耗費較多資源，(如果這樣，不如使用bottom up就好?)
 install.packages('cluster')
 library(cluster)
 ?diana
+# 在作分群時，每個特徵值都要是數值型
 dv =diana(customer_s, metric ="euclidean")
 summary(dv)
 plot(dv)
@@ -208,18 +279,24 @@ summary(c_1)
 ```{R}
 str(customer_s)
 set.seed(22)
+# centers 就是k，就是分幾群
 fit =kmeans(customer_s, centers=4)
 ?kmeans
 
 barplot(t(fit$centers), beside =TRUE,xlab="cluster", ylab="value")
 ?barplot
 fit$centers
+# customer[fit$cluster == 1, ] 看第一組的資料
+
 ```
 
 
 ```{R}
 install.packages("cluster")
 library(cluster)
+
+# 將四維空間，投影到二維空間，作降低維度
+# 背後使用組成份分析法而來，降低維度，也會降低解釋能力
 clusplot(customer_s, fit$cluster, color=TRUE, shade=TRUE)
 
 par(mfrow= c(1,2))
@@ -227,7 +304,7 @@ clusplot(customer_s, fit$cluster, color=TRUE, shade=TRUE)
 rect(-0.7,-1.7, 2.2,-1.2, border = "orange", lwd=2)
 clusplot(customer_s, fit$cluster, color = TRUE, xlim = c(-0.7,2.2), ylim = c(-1.7,-1.2))
 
-#了解component 成分為何
+#了解component 成分為何，選擇那二個compnots來作解釋，但無法作100%的解釋
 pca =princomp(customer_s)
 pca$loadings
 
@@ -235,11 +312,13 @@ pca$loadings
 
 ## Evaluating model
 ```{R}
-#silhouette
+#silhouette 側影系統，評量分群好不好
 par(mfrow= c(1,1))
 set.seed(22)
 library(cluster)
+#先産生一個分群模型
 km =kmeans(customer_s, 4)
+#放入樣本點及距離矩陣
 kms=silhouette(km$cluster,dist(customer_s))
 summary(kms)
 plot(kms)
@@ -249,23 +328,38 @@ plot(kms)
 ## 選擇k-means最佳k值
 ```{R}
 #within sum of squares
+#within sum of squrares 愈隨著分群增加而淢小，要用邊際效用，來判斷k
 nk=2:10
+# 因為只是要作增加k的比較，固定初始點，讓隨機選的變動，影響較少
+# 但實際上，若不設定種子序/或在不同種子序的情況下，可能得到不同的結果
 set.seed(22)
-WSS =sapply(nk, function(k){kmeans(customer_s, centers=k)$tot.withinss})
+# k 由2作到10, 算出每個點到中心點距離平方的總合
+WSS =sapply(nk, function(k){set.seed(22);kmeans(customer_s, centers=k)$tot.withinss})
 WSS
+
 plot(x=nk, y=WSS, type="l", xlab="number of k", ylab="within sum of squares")
 
 install.packages("fpc")
 #install.packages("robustbase", repos="http://R-Forge.R-project.org")
 library(fpc)
 ?cluster.stats
+# 代入距離矩陣，及分群結果，取得分群結果的報表
 cluster.stats(dist(customer_s), kmeans(customer_s, centers=2)$cluster)
 
-WSS =sapply(nk, function(k){set.seed(22);cluster.stats(dist(customer_s), kmeans(customer_s, centers=k)$cluster)$within.cluster.ss})
+# 取within sum of squares
+WSS =sapply(nk, function(k){set.seed(22);
+  cluster.stats(dist(customer_s), 
+                kmeans(customer_s, centers=k)$cluster)$within.cluster.ss})
+
+
+WSS =sapply(nk, function(k){set.seed(22);
+  cluster.stats(dist(customer_s), 
+                kmeans(customer_s, centers=k)$cluster)$avg.silwidth})
 
 sapply(2:10,function(k){set.seed(22);cluster.stats(dist(customer_s),kmeans(customer_s, centers=k)$cluster)$within.cluster.ss})
 
 WSS
+# 最後選k=4 為最好的結果
 plot(x=nk, y=WSS, type="l", xlab="number of k", ylab="within sum of squares")
 ```
 
@@ -281,6 +375,7 @@ nk[which.max(SW)]
 
 ## model comparison
 ```{R}
+# 比較那個演算法，比較好
 single_c=hclust(dist(customer_s), method="single")
 hc_single=cutree(single_c, k =3)
 
@@ -293,6 +388,10 @@ km =kmeans(customer_s, 4)
 cs=cluster.stats(dist(customer_s),km$cluster)
 cs[c("within.cluster.ss","avg.silwidth")]
 
+# 取的三個演算比較，kemans比較好
+# within...愈小愈好
+# avg..愈大愈好
+# 選擇kmeans比較好
 q =sapply(
   list(kmeans=km$cluster, 
        hc_single=hc_single, 
@@ -304,6 +403,7 @@ q
 ## density-based method-DBSCAN
 - http://123android.blogspot.tw/2012/01/28dec11-data-mining.html
 ```{R}
+# 密度式演算法，Eps 半徑
 install.packages("mlbench")
 # mlbench package provides many methods to generate simulated data with different shapes and sizes.
 #In this example, we generate a Cassini problem graph
@@ -315,9 +415,10 @@ p = mlbench.cassini(500)
 plot(p$x)
 
 ?mlbench.cassini
-
+# 給eps及minpts，就自動將core point分類到某一群
 ds = dbscan(data = dist(p$x),eps= 0.2, MinPts = 2, method="dist")
 ds
+#分為四群
 plot(ds, p$x)
 
 
